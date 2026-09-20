@@ -21,12 +21,12 @@ DEVICE_TYPE_NAMES = {
     "com.bowerswilkins.liberty.zpr": "Zeppelin Pro",
     "com.bowerswilkins.liberty.zep": "Zeppelin",
     "com.bowerswilkins.liberty.alb": "Panorama 3",
-    "com.bowerswilkins.liberty.ps1": "Formation Duo",
-    "com.bowerswilkins.liberty.st1": "Formation Flex",
+    "com.bowerswilkins.liberty.ps1": "Formation Wedge",
+    "com.bowerswilkins.liberty.st1": "Formation Duo",
     "com.bowerswilkins.liberty.sb1": "Formation Bar",
     "com.bowerswilkins.liberty.sw1": "Formation Bass",
     "com.bowerswilkins.liberty.connect": "Formation Audio",
-    "com.bowerswilkins.liberty.lcms": "Formation Solo",
+    "com.bowerswilkins.liberty.lcms": "Formation Flex",
 }
 
 

@@ -4,6 +4,48 @@ Custom [HACS](https://hacs.xyz/) integration for controlling B&W Formation/Zeppe
 
 Built by reverse-engineering the B&W Splice Android app. All communication is local — no cloud, no account required.
 
+---
+
+## About this fork
+
+Fork of [space192/zeppelin](https://github.com/space192/zeppelin) maintained by
+[@torchtarget](https://github.com/torchtarget), adding **Formation** support. Upstream is
+developed against a Zeppelin Pro; this fork is developed and tested against a real
+Formation mesh of three speakers (2× Formation Flex, 1× Formation Wedge) on
+Home Assistant 2026.8.x, with Spotify Connect and Roon as sources.
+
+The four fixes below are offered back upstream in
+[`fix/formation-mesh-support`](https://github.com/torchtarget/zeppelin/tree/fix/formation-mesh-support).
+See [docs/FORMATION.md](docs/FORMATION.md) for the measured protocol notes behind them.
+
+### What this fork changes
+
+| # | Problem | Cause | Fix |
+|---|---|---|---|
+| 1 | Adding **any** speaker fails with *"Unknown error occurred"* on v0.5.0–v0.5.2 | `get_version()` was lost in a merge — its body was left dangling at the end of `set_audio_output_delay()`, so the config flow raised `AttributeError` | Method restored; the config flow also maps unexpected exceptions to `cannot_connect` so a future slip shows a real error |
+| 2 | With several speakers, entries get the **wrong name and node id**, and the second and third are rejected as duplicates | `GET /1/mesh/nodes` returns *every* member of the mesh, and the flow used `nodes[0]` | Ask the speaker which node it is (`GET /mesh/node`) and pick that entry; falls back to `nodes[0]` for a single speaker |
+| 3 | **Every speaker shows the same track** — whatever any one of them last played | Each member's WebSocket relays the other members' messages; the client took the first tile in the map regardless of sender | Filter audiotile, artwork and volume by the speaker's own node id, matching `sinkNodeIDs` too so a grouped speaker still follows its group. An empty tile now returns the player to idle |
+| 4 | Players report **volume 0.0** until someone changes the volume | The initial volume was requested before the WebSocket carrying the reply was connected, so the answer was dropped | Wait for the connection, then request volume *and* the current track, so a speaker that is already playing shows it straight away |
+
+Fork-only, not part of the upstream pull request:
+
+- **Corrected model names.** `liberty.lcms` is a Formation **Flex** (not "Formation Solo") and
+  `liberty.ps1` is a Formation **Wedge** (not "Formation Duo"), per the `ModelNumber` and
+  AirPlay records of real hardware. Before this, Home Assistant labelled the speakers wrongly.
+- **Version `0.5.3-formation.1`**, which sorts above upstream 0.5.2 and below a future
+  upstream 0.5.3, so HACS offers this build now and steps aside when upstream ships its own.
+
+### Known-dead on Formation
+
+- **The LED light entity does nothing.** `liberty.lights.hardware-downlight` returns `null`
+  on all three Formation models tested; the downlight is a Zeppelin feature. The entity is
+  still created — removing it is a breaking change deferred to a later release.
+- **Audio Output Delay does nothing.** It uses the StreamSDK API on port 80, which Formation
+  speakers do not open. Only ports 7000 (AirPlay) and 42425 (StateD) are listening. Setup
+  tolerates the failure.
+
+---
+
 ## Supported Devices
 
 | Device | Type ID |
@@ -11,13 +53,18 @@ Built by reverse-engineering the B&W Splice Android app. All communication is lo
 | Zeppelin Pro | `com.bowerswilkins.liberty.zpr` |
 | Zeppelin | `com.bowerswilkins.liberty.zep` |
 | Panorama 3 | `com.bowerswilkins.liberty.alb` |
-| Formation Duo | `com.bowerswilkins.liberty.ps1` |
-| Formation Flex | `com.bowerswilkins.liberty.st1` |
+| Formation Wedge | `com.bowerswilkins.liberty.ps1` |
+| Formation Flex | `com.bowerswilkins.liberty.lcms` |
 | Formation Bar | `com.bowerswilkins.liberty.sb1` |
 | Formation Bass | `com.bowerswilkins.liberty.sw1` |
 | Formation Audio | `com.bowerswilkins.liberty.connect` |
 
-> Only tested on Zeppelin Pro. Other devices should work but are untested.
+| Formation Duo | `com.bowerswilkins.liberty.st1` (unconfirmed) |
+
+> Upstream is tested on Zeppelin Pro. This fork is tested on Formation Flex and Formation
+> Wedge. The type ids for Duo, Bar, Bass and Audio are inherited from upstream and remain
+> unconfirmed — if yours is mislabelled in Home Assistant, please open an issue with the
+> `type` reported by `GET /1/mesh/nodes` and the model on the speaker's label.
 
 ## Features
 
@@ -95,7 +142,11 @@ Copy `custom_components/bw_zeppelin` to your Home Assistant `custom_components/`
 
 - The speaker uses a self-signed TLS certificate — SSL verification is disabled for local communication.
 - The Splice app may not discover speakers connected via Ethernet. This integration works fine over Ethernet.
-- LED control, EQ, media player, and firmware update checks are implemented. Volume, playback, and source control are possible via the same API but not yet exposed.
+- LED control, EQ, media player, and firmware update checks are implemented. Source control,
+  seek, shuffle and repeat are possible via the same API but not yet exposed — see
+  [docs/FORMATION.md](docs/FORMATION.md) for what is confirmed to exist.
+- On Formation speakers the LED light and Audio Output Delay entities are inert; see
+  *Known-dead on Formation* above.
 
 ## API Reference
 
