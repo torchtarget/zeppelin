@@ -49,12 +49,26 @@ class BwZeppelinConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         client = BwZeppelinApiClient(session=session, host=host)
         try:
             fw_version = await client.get_version()
+            local_node_id = await client.get_local_node_id()
             nodes = await client.get_nodes()
         except BwZeppelinApiError:
             return None
+        except Exception:  # noqa: BLE001 - report as cannot_connect, not "Unknown error"
+            _LOGGER.exception("Unexpected error validating speaker at %s", host)
+            return None
         if not nodes:
             return None
-        node = nodes[0]
+        # Formation speakers form a mesh and every member lists all the others, so
+        # nodes[0] is whichever node happens to come first, not the one we asked.
+        node = next((n for n in nodes if n.get("nodeID") == local_node_id), None)
+        if node is None:
+            if len(nodes) > 1:
+                _LOGGER.warning(
+                    "Node %s not found in the mesh list from %s; using the first entry",
+                    local_node_id,
+                    host,
+                )
+            node = nodes[0]
         return {
             CONF_HOST: host,
             CONF_NODE_ID: node["nodeID"],

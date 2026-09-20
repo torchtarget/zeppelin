@@ -9,6 +9,7 @@ import aiohttp
 
 from .const import (
     DEFAULT_PORT,
+    PROPERTY_AUDIOTILE,
     PROPERTY_AUDIOTILE_ARTWORK,
     PROPERTY_DEVICE_INFO,
     PROPERTY_LIGHT_STATE,
@@ -154,8 +155,19 @@ class BwZeppelinApiClient:
             value={"type": "i64_", "i64_": int(microseconds)},
         )
         self._streamsdk_check_error(data, SETTING_AUDIO_OUTPUT_DELAY)
+
+    async def get_version(self) -> str:
         data = await self._get("/software/version")
         return data.get("version", "unknown")
+
+    async def get_local_node_id(self) -> str | None:
+        """Node id of the speaker at this host.
+
+        `get_nodes()` lists every member of the mesh, so it cannot identify which
+        one answered; this endpoint names the speaker we are actually talking to.
+        """
+        data = await self._get("/mesh/node")
+        return data.get("node_id")
 
     async def get_nodes(self) -> list[dict]:
         data = await self._get("/1/mesh/nodes")
@@ -167,6 +179,9 @@ class BwZeppelinApiClient:
 
     async def request_artwork(self) -> None:
         await self._post_stated("get_property", {"property": PROPERTY_AUDIOTILE_ARTWORK})
+
+    async def request_audiotile(self) -> None:
+        await self._post_stated("get_property", {"property": PROPERTY_AUDIOTILE})
 
     async def get_device_info(self) -> dict:
         data = await self._post_stated("get_property", {"property": PROPERTY_DEVICE_INFO})

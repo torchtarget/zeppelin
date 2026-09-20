@@ -50,7 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except BwZeppelinApiError:
         _LOGGER.warning("Failed to fetch initial audio output delay")
 
-    ws_client = BwZeppelinWebSocket(host)
+    ws_client = BwZeppelinWebSocket(host, entry.data[CONF_NODE_ID])
     ws_client.start(hass)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {

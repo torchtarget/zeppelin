@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import logging
@@ -79,7 +80,7 @@ class BwZeppelinMediaPlayer(MediaPlayerEntity):
         self._unsub_ws_tile = self._ws_client.register_audiotile_callback(self._on_audiotile)
         self._unsub_ws_art = self._ws_client.register_artwork_callback(self._on_artwork)
         self._unsub_ws_vol = self._ws_client.register_volume_callback(self._on_volume)
-        self.hass.async_create_task(self._request_initial_volume())
+        self.hass.async_create_task(self._request_initial_state())
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsub_ws_tile:
@@ -89,17 +90,30 @@ class BwZeppelinMediaPlayer(MediaPlayerEntity):
         if self._unsub_ws_vol:
             self._unsub_ws_vol()
 
-    async def _request_initial_volume(self) -> None:
+    async def _request_initial_state(self) -> None:
+        # Both replies arrive on the WebSocket, so they are lost if it is not up yet.
+        try:
+            await asyncio.wait_for(self._ws_client.connected.wait(), timeout=20)
+        except asyncio.TimeoutError:
+            _LOGGER.debug("WebSocket still connecting; requesting initial state anyway")
         try:
             await self._api.request_volume()
+            await self._api.request_audiotile()
         except BwZeppelinApiError:
-            _LOGGER.debug("Failed to request initial volume")
+            _LOGGER.debug("Failed to request initial state")
 
     def _track_key(self, tile: dict) -> str:
         return f"{tile.get('title', '')}|{tile.get('artist', '')}|{tile.get('album', '')}"
 
     @callback
     def _on_audiotile(self, tile: dict) -> None:
+        if not tile:  # nothing playing on this speaker
+            self._tile = {}
+            self._last_track_key = ""
+            self._artwork_bytes = None
+            self._artwork_url = None
+            self.async_write_ha_state()
+            return
         track_key = self._track_key(tile)
         track_changed = track_key != self._last_track_key
         self._tile = tile

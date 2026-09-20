@@ -19,10 +19,28 @@ MAX_RECONNECT_INTERVAL = 120
 CONNECT_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
+def select_own_tile(value: dict, node_id: str) -> dict | None:
+    """Pick this speaker's audiotile out of a mesh-wide audiotile map.
+
+    Keys are "<nodeID>+<service>", and a tile lists every node it is playing on in
+    ``sinkNodeIDs``, so a speaker in a playback group matches on the sink list.
+    """
+    if not isinstance(value, dict):
+        return None
+    for key, tile in value.items():
+        if not isinstance(tile, dict):
+            continue
+        if str(key).startswith(node_id) or node_id in (tile.get("sinkNodeIDs") or []):
+            return tile
+    return None
+
+
 class BwZeppelinWebSocket:
 
-    def __init__(self, host: str) -> None:
+    def __init__(self, host: str, node_id: str | None = None) -> None:
         self._host = host
+        self._node_id = node_id
+        self.connected = asyncio.Event()
         self._url = f"wss://{host}:{DEFAULT_PORT}/messages"
         self._ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         self._ssl_context.check_hostname = False
@@ -82,6 +100,7 @@ class BwZeppelinWebSocket:
             )
             try:
                 _LOGGER.debug("WebSocket connected to %s", self._host)
+                self.connected.set()
                 async for msg in ws:
                     if self._stop_event.is_set():
                         return
@@ -90,6 +109,7 @@ class BwZeppelinWebSocket:
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
             finally:
+                self.connected.clear()
                 if not ws.closed:
                     await ws.close()
         finally:
@@ -101,20 +121,25 @@ class BwZeppelinWebSocket:
         except json.JSONDecodeError:
             return
 
-        method = (
-            data.get("payload", {})
-            .get("args", {})
-            .get("message", {})
-            .get("method", {})
-        )
+        args = data.get("payload", {}).get("args", {})
+        if not isinstance(args, dict):
+            return
+        method = args.get("message", {}).get("method", {})
         name = method.get("name")
         params = method.get("parameters", {})
         prop = params.get("property", "")
+        # Every mesh member relays the other members' messages, so act only on ours.
+        from_self = self._node_id is None or args.get("sendingNodeID") == self._node_id
 
         if prop == PROPERTY_AUDIOTILE and name in ("property_changed", "success"):
             value = params.get("value", {})
-            tile = next(iter(value.values()), None) if isinstance(value, dict) else None
-            if tile:
+            if self._node_id is None:
+                tile = next(iter(value.values()), None) if isinstance(value, dict) else None
+            else:
+                tile = select_own_tile(value, self._node_id)
+                if tile is None and from_self and value == {}:
+                    tile = {}  # our speaker reports nothing playing
+            if tile is not None:
                 for cb in self._audiotile_callbacks:
                     try:
                         cb(tile)
@@ -123,7 +148,17 @@ class BwZeppelinWebSocket:
 
         elif prop == PROPERTY_AUDIOTILE_ARTWORK and name in ("property_changed", "success"):
             value = params.get("value", {})
-            artwork = next(iter(value.values()), None) if isinstance(value, dict) else None
+            artwork = None
+            if isinstance(value, dict):
+                own = [
+                    v
+                    for k, v in value.items()
+                    if self._node_id and str(k).startswith(self._node_id)
+                ]
+                if own:
+                    artwork = own[0]
+                elif from_self:
+                    artwork = next(iter(value.values()), None)
             if artwork:
                 for cb in self._artwork_callbacks:
                     try:
@@ -131,7 +166,12 @@ class BwZeppelinWebSocket:
                     except Exception:
                         _LOGGER.exception("Error in artwork callback")
 
-        elif name in ("volume_changed", "success") and "value" in params and "muted" in params:
+        elif (
+            name in ("volume_changed", "success")
+            and "value" in params
+            and "muted" in params
+            and from_self
+        ):
             for cb in self._volume_callbacks:
                 try:
                     cb(params)
